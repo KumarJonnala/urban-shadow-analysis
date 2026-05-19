@@ -1,5 +1,5 @@
 # Data processing
-numpy
+numpy<2.0
 pandas
 scipy
 
@@ -10,3 +10,11 @@ rasterio
 # Visualisation
 matplotlib
 seaborn
+
+
+scikit-learn
+scikit-image
+torch
+torchvision
+pyproj
+osmnx

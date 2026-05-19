@@ -1,12 +1,6 @@
 
 AREAS = {
-    "ovgu_bbox1": {
-        "west": 11.636978,
-        "east": 11.657417,
-        "south": 52.137077,
-        "north": 52.142753,
-    },
-    "ovgu_bbox2": {
+    "ovgu_bbox": {
         "west": 11.639779,
         "east": 11.652739,
         "south": 52.137663,

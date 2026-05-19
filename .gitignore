@@ -2,6 +2,8 @@ env/
 __pycache__/
 *.pyc
 .DS_Store
+cache/
+lightning_logs/
 
 # data files
 data/

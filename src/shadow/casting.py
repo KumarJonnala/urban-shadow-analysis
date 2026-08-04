@@ -12,7 +12,11 @@ from rasterio.transform import from_bounds
 from scipy.ndimage import label as cc_label
 from shapely.geometry import shape as sg_shape
 
-from src.config import MAX_CROWN_RADIUS_M, ALLOMETRIC_A, ALLOMETRIC_B, ALLOMETRIC_PROFILES
+from src.config import (
+    MAX_CROWN_RADIUS_M, ALLOMETRIC_A, ALLOMETRIC_B, ALLOMETRIC_PROFILES,
+    MIN_COMPONENT_PIXELS, WATERSHED_PEAK_SEP_FRAC,
+    MIN_SUN_ELEVATION_DEG, MAX_SHADOW_FACTOR,
+)
 from src.shadow.solar import sun_position, _tile_center
 
 _to_utm = Transformer.from_crs("EPSG:4326", "EPSG:25832", always_xy=True)
@@ -54,7 +58,8 @@ def _watershed_split_labels(
     n: int,
     pixel_size_m: float,
     max_crown_radius_m: float,
-    min_component_pixels: int = 50,
+    min_component_pixels: int = MIN_COMPONENT_PIXELS,
+    peak_sep_frac: float = WATERSHED_PEAK_SEP_FRAC,
 ) -> np.ndarray:
     """Split oversized CC components via watershed; return modified labeled array.
 
@@ -64,13 +69,17 @@ def _watershed_split_labels(
     Single-peak oversized blobs are left under their original label (caller caps
     them during height estimation).  Small sub-regions below min_component_pixels
     are zeroed out.
+
+    peak_sep_frac scales the minimum separation between seed peaks: peaks closer
+    than max_crown_radius_m * peak_sep_frac are merged, so lower values split
+    more aggressively.
     """
     from scipy.ndimage import distance_transform_edt
     from skimage.feature import peak_local_max
     from skimage.segmentation import watershed
 
     px_area = pixel_size_m ** 2
-    min_dist_px = max(1, int(max_crown_radius_m * 0.5 / pixel_size_m))
+    min_dist_px = max(1, int(max_crown_radius_m * peak_sep_frac / pixel_size_m))
     next_label = int(labeled.max()) + 1
 
     for k in range(1, n + 1):
@@ -110,7 +119,7 @@ def _watershed_split_labels(
 def estimate_tree_heights(
     tree_mask: np.ndarray,
     pixel_size_m: float,
-    min_component_pixels: int = 50,
+    min_component_pixels: int = MIN_COMPONENT_PIXELS,
     max_crown_radius_m: float = MAX_CROWN_RADIUS_M,
     dominant_genus: str | None = None,
 ) -> tuple[np.ndarray, dict[int, tuple[float, float]]]:
@@ -176,7 +185,7 @@ def vectorize_trees(
     tree_mask: np.ndarray,
     bbox: dict,
     vegetation_model: str,
-    min_component_pixels: int = 50,
+    min_component_pixels: int = MIN_COMPONENT_PIXELS,
     dominant_genus: str | None = None,
     max_crown_radius_m: float = MAX_CROWN_RADIUS_M,
     apply_watershed: bool = False,
@@ -281,9 +290,9 @@ def cast_tree_shadows(
     seg_map: np.ndarray,
     bbox: dict,
     dt_utc: dt.datetime,
-    min_elevation_deg: float = 5.0,
-    max_shadow_factor: float = 5.0,
-    min_component_pixels: int = 50,
+    min_elevation_deg: float = MIN_SUN_ELEVATION_DEG,
+    max_shadow_factor: float = MAX_SHADOW_FACTOR,
+    min_component_pixels: int = MIN_COMPONENT_PIXELS,
     tree_gdf: gpd.GeoDataFrame | None = None,
     max_crown_radius_m: float = MAX_CROWN_RADIUS_M,
 ) -> np.ndarray:

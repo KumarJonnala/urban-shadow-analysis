@@ -4,6 +4,13 @@ from __future__ import annotations
 import numpy as np
 from skimage.morphology import closing, disk, remove_small_objects
 
+from src.config import (
+    VARI_THRESHOLD, VARI_MIN_SIZE, VARI_CLOSING_RADIUS,
+    DEEPFOREST_SCORE_THRESHOLD, DEEPFOREST_PATCH_SIZE,
+    DEEPFOREST_PATCH_OVERLAP, DEEPFOREST_IOU_THRESHOLD,
+    SAMGEO_MIN_SEGMENT_SIZE, TCD_SEGFORMER_RESIZE_TO,
+)
+
 
 def _best_device() -> str:
     import torch
@@ -27,9 +34,9 @@ def _vari(img: np.ndarray) -> np.ndarray:
 
 def vari_mask(
     img: np.ndarray,
-    threshold: float = 0.05,
-    min_size: int = 500,
-    closing_radius: int = 4,
+    threshold: float = VARI_THRESHOLD,
+    min_size: int = VARI_MIN_SIZE,
+    closing_radius: int = VARI_CLOSING_RADIUS,
 ) -> np.ndarray:
     """Vegetation mask from RGB image using the VARI spectral index.
 
@@ -72,12 +79,12 @@ def load_deepforest():
 def deepforest_mask(
     img: np.ndarray,
     model=None,
-    score_threshold: float = 0.3,
-    patch_size: int = 400,
-    patch_overlap: float = 0.05,
-    iou_threshold: float = 0.15,
-    min_size: int = 500,
-    closing_radius: int = 4,
+    score_threshold: float = DEEPFOREST_SCORE_THRESHOLD,
+    patch_size: int = DEEPFOREST_PATCH_SIZE,
+    patch_overlap: float = DEEPFOREST_PATCH_OVERLAP,
+    iou_threshold: float = DEEPFOREST_IOU_THRESHOLD,
+    min_size: int = VARI_MIN_SIZE,
+    closing_radius: int = VARI_CLOSING_RADIUS,
 ) -> np.ndarray:
     """Vegetation mask via DeepForest tree crown bounding box detection.
 
@@ -229,8 +236,8 @@ def load_samgeo():
 def samgeo_mask(
     img: np.ndarray,
     model=None,
-    vari_threshold: float = 0.05,
-    min_segment_size: int = 200,
+    vari_threshold: float = VARI_THRESHOLD,
+    min_segment_size: int = SAMGEO_MIN_SEGMENT_SIZE,
 ) -> np.ndarray:
     """Vegetation mask via SAM automatic segmentation filtered by VARI.
 
@@ -300,7 +307,7 @@ def tcd_segformer_mask(
     processor=None,
     model=None,
     device: str | None = None,
-    resize_to: int | None = 1024,
+    resize_to: int | None = TCD_SEGFORMER_RESIZE_TO,
 ) -> np.ndarray:
     """Tree cover mask via TCD SegFormer (restor/tcd-segformer-mit-b5).
 
@@ -362,10 +369,10 @@ def ensemble_mask(
     img: np.ndarray,
     df_model=None,
     mode: str = "intersection",
-    vari_threshold: float = 0.05,
-    score_threshold: float = 0.3,
-    min_size: int = 500,
-    closing_radius: int = 4,
+    vari_threshold: float = VARI_THRESHOLD,
+    score_threshold: float = DEEPFOREST_SCORE_THRESHOLD,
+    min_size: int = VARI_MIN_SIZE,
+    closing_radius: int = VARI_CLOSING_RADIUS,
 ) -> np.ndarray:
     """Tree mask by combining VARI and DeepForest predictions.
 

@@ -27,9 +27,49 @@ DEFAULT_VEGETATION_MODEL = "tcd_segformer"
 # applying the allometric formula. 8 m ≈ 200 m² crown area.
 MAX_CROWN_RADIUS_M = 8.0
 
+# --- Vectorisation and watershed splitting (src/shadow/casting.py) ---
+
+# Connected components smaller than this many pixels are discarded as noise,
+# both when vectorising and when accepting watershed sub-regions. At the 250 m
+# tile resolution (~0.21 m/px) 50 px ≈ 2.2 m² of canopy.
+MIN_COMPONENT_PIXELS = 50
+
+# Minimum separation between watershed seed peaks, as a fraction of the
+# applicable crown radius. Peaks closer than
+# max_crown_radius_m * this / pixel_size_m are merged into one crown, so lower
+# values split more aggressively.
+WATERSHED_PEAK_SEP_FRAC = 0.5
+
+# --- Shadow casting (src/shadow/casting.py) ---
+
+# Sun elevation floor (degrees). At or below this — including night — the tile
+# produces an all-False shadow mask rather than implausibly long shadows.
+MIN_SUN_ELEVATION_DEG = 5.0
+
+# Shadow length is capped at this multiple of the crown radius, which bounds
+# the shadow cast by a low sun (length grows as 1/tan(elevation)).
+MAX_SHADOW_FACTOR = 5.0
+
 # Optional Baumkataster GeoPackage for enriching tree FGBs with measured heights/species.
 # Set to None to disable enrichment (pipeline runs without it).
 BAUMKATASTER_PATH = Path(__file__).resolve().parents[1] / "references" / "Baeume_SFM_2026.gpkg"
+
+# --- Baumkataster matching (src/shadow/cadastre.py) ---
+
+# A pipeline crown polygon matches the nearest BK tree whose buffered point it
+# intersects, provided the polygon centroid lies within this distance of that
+# point. Observed matches on ovgu_bbox @ 250 m sit well inside it
+# (median 1.2 m, max 14.2 m), so it is a safety ceiling rather than a tight fit.
+BK_MATCH_RADIUS_M = 15.0
+
+# BK records below either floor are treated as unmeasured and excluded from
+# matching: they carry placeholder zeros rather than real survey values.
+BK_MIN_HEIGHT_M = 1.0        # Baumhoehe (m)
+BK_MIN_CROWN_DIAM_M = 0.5    # Kronendurchmesser (m)
+
+# BK points are buffered by max(Kronendurchmesser/2, this) to generate match
+# candidates. The floor keeps small-crowned or newly planted trees reachable.
+BK_MATCH_BUFFER_MIN_M = 2.0
 
 # Allometric height model: H = exp(ALLOMETRIC_A + ALLOMETRIC_B * ln(CPA_m2))
 # Power-law form: direct OLS of ln(H) ~ ln(CPA) on Magdeburg Baumkataster 2026
@@ -38,6 +78,33 @@ BAUMKATASTER_PATH = Path(__file__).resolve().parents[1] / "references" / "Baeume
 # Source: Baeume_SFM_2026.gpkg (references/), fitted in test_notebooks/shadow_analysis.ipynb.
 ALLOMETRIC_A = 1.317   # ln-space intercept
 ALLOMETRIC_B = 0.318   # power-law exponent on CPA (m²)
+
+# --- Vegetation segmentation models (src/segmentation/vegetation.py) ---
+# Only the TCD_SEGFORMER_* value affects the default pipeline
+# (DEFAULT_VEGETATION_MODEL = "tcd_segformer"); the rest apply to the
+# alternative models reachable via --vegetation-model.
+
+# TCD SegFormer is scale-sensitive: inference runs on the image resized so its
+# longer side is this many pixels, then the mask is upsampled back. Set to None
+# to run at native resolution.
+TCD_SEGFORMER_RESIZE_TO = 1024
+
+# VARI (Visible Atmospherically Resistant Index) vegetation masking. Shared by
+# vari_mask, samgeo_mask and ensemble_mask. Tunable via tune_vari()
+# in src/segmentation/tuning.py, which overrides these with its own grid.
+VARI_THRESHOLD = 0.05        # index value above which a pixel counts as vegetation
+VARI_MIN_SIZE = 500          # drop mask components below this pixel count
+VARI_CLOSING_RADIUS = 4      # morphological closing disk radius (px)
+
+# DeepForest crown detection. Inference is tiled: patch_size with patch_overlap
+# fraction, then boxes are merged by non-max suppression at iou_threshold.
+DEEPFOREST_SCORE_THRESHOLD = 0.3
+DEEPFOREST_PATCH_SIZE = 400
+DEEPFOREST_PATCH_OVERLAP = 0.05
+DEEPFOREST_IOU_THRESHOLD = 0.15
+
+# SAM-geo: discard segments below this area (px) before the VARI greenness test.
+SAMGEO_MIN_SEGMENT_SIZE = 200
 
 # Per-genus allometric profiles: (A, B) pairs for H = exp(A + B*ln(CPA_m2)).
 # Keyed by Gattung-lang value (full species string). Falls back to ALLOMETRIC_A/B if absent.

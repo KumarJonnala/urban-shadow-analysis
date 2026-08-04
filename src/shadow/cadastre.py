@@ -6,7 +6,10 @@ import math
 import geopandas as gpd
 import pandas as pd
 
-from src.config import ALLOMETRIC_A, ALLOMETRIC_B, ALLOMETRIC_PROFILES
+from src.config import (
+    ALLOMETRIC_A, ALLOMETRIC_B, ALLOMETRIC_PROFILES,
+    BK_MATCH_RADIUS_M, BK_MIN_HEIGHT_M, BK_MIN_CROWN_DIAM_M, BK_MATCH_BUFFER_MIN_M,
+)
 
 # Genera known to be deciduous in the Magdeburg climate zone
 DECIDUOUS_GENERA = {
@@ -27,13 +30,28 @@ def tile_dominant_genus(bk_tile: gpd.GeoDataFrame) -> str | None:
 def enrich_from_baumkataster(
     tree_gdf: gpd.GeoDataFrame,
     bk_gdf: gpd.GeoDataFrame,
-    match_radius_m: float = 15.0,
+    match_radius_m: float = BK_MATCH_RADIUS_M,
+    min_height_m: float = BK_MIN_HEIGHT_M,
+    min_crown_diam_m: float = BK_MIN_CROWN_DIAM_M,
+    buffer_min_m: float = BK_MATCH_BUFFER_MIN_M,
 ) -> gpd.GeoDataFrame:
     """Spatial join BK measurements onto pipeline tree polygons (left join).
 
     For each pipeline polygon the nearest BK tree within match_radius_m is found.
     Matched trees have height_m / crown_radius_m overwritten with measured values.
     All rows gain six new columns; unmatched rows keep allometric estimates.
+
+    Parameters
+    ----------
+    match_radius_m : float
+        Max polygon-centroid to BK-point distance for a match (default
+        BK_MATCH_RADIUS_M).
+    min_height_m, min_crown_diam_m : float
+        BK validity floors — records at or below either are treated as
+        unmeasured and excluded (defaults BK_MIN_HEIGHT_M / BK_MIN_CROWN_DIAM_M).
+    buffer_min_m : float
+        Floor on the BK point buffer used to generate match candidates
+        (default BK_MATCH_BUFFER_MIN_M).
 
     New columns
     -----------
@@ -43,6 +61,7 @@ def enrich_from_baumkataster(
     trunk_circumference_cm Stammumfang in cm (None for unmatched or 0-valued)
     planting_year         Pflanzjahr (None for unmatched or 0-valued)
     bk_match_dist_m       centroid-to-point distance in metres (None for unmatched)
+    h_global_m            species-agnostic allometric height (always populated)
     """
     result = tree_gdf.copy()
     result["allometric_height_m"] = result["height_m"]
@@ -53,19 +72,27 @@ def enrich_from_baumkataster(
     result["planting_year"] = None
     result["bk_match_dist_m"] = None
 
+    # Depends only on crown_area_m2, never on a BK match, so it is computed up front —
+    # the early returns below would otherwise leave it off tiles with no matches.
+    if "crown_area_m2" in result.columns:
+        result["h_global_m"] = result["crown_area_m2"].apply(
+            lambda a: math.exp(ALLOMETRIC_A + ALLOMETRIC_B * math.log(max(a, 1e-6)))
+        )
+
     if bk_gdf is None or len(bk_gdf) == 0:
         return result
 
     bk_valid = bk_gdf[
-        (bk_gdf["Baumhoehe"] > 1) & (bk_gdf["Kronendurchmesser"] > 0.5)
+        (bk_gdf["Baumhoehe"] > min_height_m)
+        & (bk_gdf["Kronendurchmesser"] > min_crown_diam_m)
     ].copy()
     if len(bk_valid) == 0:
         return result
 
-    # Buffer BK points by max(crown_radius, 2 m) for intersection candidate test
+    # Buffer BK points by max(crown_radius, buffer_min_m) for intersection candidate test
     bk_circles = bk_valid.copy()
     bk_circles["geometry"] = bk_circles.apply(
-        lambda r: r.geometry.buffer(max(r["Kronendurchmesser"] / 2, 2.0)), axis=1
+        lambda r: r.geometry.buffer(max(r["Kronendurchmesser"] / 2, buffer_min_m)), axis=1
     )
 
     # Left sjoin — all pipeline polygons retained
@@ -135,10 +162,5 @@ def enrich_from_baumkataster(
 
     result = result.drop(columns=["Baumhoehe", "Kronendurchmesser",
                                    "Gattung lang", "Stammumfang", "Pflanzjahr", "_dist"])
-
-    if "crown_area_m2" in result.columns:
-        result["h_global_m"] = result["crown_area_m2"].apply(
-            lambda a: math.exp(ALLOMETRIC_A + ALLOMETRIC_B * math.log(max(a, 1e-6)))
-        )
 
     return gpd.GeoDataFrame(result, geometry="geometry", crs=tree_gdf.crs)

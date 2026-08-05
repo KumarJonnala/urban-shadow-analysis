@@ -1,0 +1,47 @@
+{
+  "area_name": "ovgu_bbox",
+  "tile_size_m": 1000,
+  "n_tiles": 1,
+  "summary": {
+    "bias_m": 7.938,
+    "mae_m": 9.42,
+    "rel_bias_pct": 80.2,
+    "mape_pct": 87.0,
+    "r2": -3.611,
+    "mean_height_m": 18.917,
+    "n_matched": 142,
+    "n_segmented": 336,
+    "match_rate_pct": 42.3,
+    "pipe_crown_area_m2": 106569.6,
+    "bk_crown_area_m2": 70724.1,
+    "crown_area_ratio": 1.507,
+    "pipe_canopy_pct": 13.7,
+    "bk_canopy_pct": 9.1
+  },
+  "tiles": [
+    {
+      "ix": 0,
+      "iy": 0,
+      "genus": "Tilia cordata",
+      "bias_m": 7.938,
+      "mae_m": 9.42,
+      "rel_bias_pct": 80.2,
+      "mape_pct": 87.0,
+      "r2": -3.611,
+      "bias_global_m": 7.022,
+      "mae_global_m": 8.758,
+      "mape_global_pct": 83.0,
+      "r2_global": -3.009,
+      "match_rate_pct": 42.3,
+      "n_matched": 142,
+      "n_segmented": 336,
+      "n_bk": 1060,
+      "pipe_crown_area_m2": 106569.6,
+      "bk_crown_area_m2": 70724.1,
+      "crown_area_ratio": 1.507,
+      "pipe_canopy_pct": 13.7,
+      "bk_canopy_pct": 9.1,
+      "mean_height_m": 18.917
+    }
+  ]
+}

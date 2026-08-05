@@ -1,0 +1,21 @@
+{
+  "area_name": "ovgu_bbox",
+  "tile_size_m": 1000,
+  "overall": {
+    "n": 336,
+    "mean_pct": 7.972,
+    "std_pct": 9.094,
+    "pct_trees_gt5pct": 70.54,
+    "pct_trees_gt10pct": 42.56
+  },
+  "tiles": [
+    {
+      "tile": "(0,0)",
+      "n": 336,
+      "mean_pct": 7.972,
+      "std_pct": 9.094,
+      "pct_trees_gt5pct": 70.54,
+      "pct_trees_gt10pct": 42.56
+    }
+  ]
+}

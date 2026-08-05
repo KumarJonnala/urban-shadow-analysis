@@ -1,0 +1,45 @@
+{
+  "area_name": "ovgu_bbox",
+  "tile_size_m": 500,
+  "overall": {
+    "n": 883,
+    "mean_pct": 4.109,
+    "std_pct": 8.785,
+    "pct_trees_gt5pct": 53.11,
+    "pct_trees_gt10pct": 25.71
+  },
+  "tiles": [
+    {
+      "tile": "(0,0)",
+      "n": 294,
+      "mean_pct": 5.765,
+      "std_pct": 7.982,
+      "pct_trees_gt5pct": 65.31,
+      "pct_trees_gt10pct": 31.29
+    },
+    {
+      "tile": "(0,1)",
+      "n": 264,
+      "mean_pct": 5.102,
+      "std_pct": 10.988,
+      "pct_trees_gt5pct": 63.26,
+      "pct_trees_gt10pct": 34.85
+    },
+    {
+      "tile": "(1,0)",
+      "n": 178,
+      "mean_pct": 3.447,
+      "std_pct": 8.532,
+      "pct_trees_gt5pct": 58.99,
+      "pct_trees_gt10pct": 23.6
+    },
+    {
+      "tile": "(1,1)",
+      "n": 147,
+      "mean_pct": -0.187,
+      "std_pct": 2.228,
+      "pct_trees_gt5pct": 3.4,
+      "pct_trees_gt10pct": 0.68
+    }
+  ]
+}

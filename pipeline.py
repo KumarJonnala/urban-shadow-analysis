@@ -1139,9 +1139,14 @@ def cmd_segment(vegetation_model: str = DEFAULT_VEGETATION_MODEL, tile_size_m: i
                     img, t, buildings, roads, tree_mask,
                     out_dir=seg_dir, stem=stem,
                 )
+                # Split oversized components before the BK join: a merged blob has one
+                # centroid, so it can claim only one of the several catalogued trees it
+                # actually covers, and its inflated area inflates the allometric height
+                # that gets scored against that single tree's measurement.
                 tree_gdf = vectorize_trees(
                     tree_mask, t, vegetation_model,
                     dominant_genus=genus, max_crown_radius_m=max_r,
+                    apply_watershed=True,
                 )
                 if bk_tile is not None:
                     tree_gdf = enrich_from_baumkataster(tree_gdf, bk_tile)

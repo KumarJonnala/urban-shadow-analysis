@@ -14,3 +14,9 @@ lightning_logs/
 
 ALTERNATIVES.md
 METHODS.md
+
+# HighResCanopyHeight (Meta) — upstream clone, model weights and demo raster.
+# The clone carries its own .git; provenance is recorded in src_dino/NOTES.md.
+src_dino/HighResCanopyHeight/
+src_dino/checkpoints/
+src_dino/demo/

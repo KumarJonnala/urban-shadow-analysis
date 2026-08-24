@@ -674,3 +674,170 @@ Useful for identifying tall-tree zones (river banks, old parks) vs. young street
 | TCD tree class | 1 | `vegetation.py:303` | binary class index for TCD model |
 | compare-sizes resolution | 1.0 m/px | `pipeline.py:316` | common grid for multi-size IoU |
 | compare-sizes reference | 250 m | `pipeline.py:319` | reference tile size for precision/recall |
+
+---
+
+## 10. Validation Outputs
+
+The pipeline saves three validation artefacts automatically after each `segment` run.
+
+### 10.1 Height Comparison (`_save_height_comparison`)
+
+**What it measures:** how much the per-species allometric prediction deviates from the global
+model across every segmented tree (not just BK-matched ones).
+
+```
+diff_pct = (allometric_height_m − h_global_m) / h_global_m × 100   [%]
+```
+
+**Output files:**
+- `{area}_height_comparison_{size}m.png` — per-tile boxplots + overall histogram (display clipped to p2–p98)
+- `{area}_height_comparison_{size}m.json` — per-tile and overall statistics
+
+**Interpretation:** tiles with `mean_pct > +10%` are dominated by species with a high A-coefficient
+(e.g. Populus canadensis, A=2.24) — their per-species model predicts taller trees than the global
+baseline for the same crown area. Tiles with `mean_pct < −10%` are dominated by low-A species
+(e.g. Tilia cordata, A=1.08), predicted shorter than the global model. Tiles near 0% contain species
+whose per-species fit is close to the global coefficients. The overall distribution describes how
+much the species composition of the area shifts estimated heights relative to a uniform city-wide
+baseline.
+
+`pipeline.py:_save_height_comparison`
+
+### 10.2 Watershed Comparison (`_save_watershed_comparison`)
+
+**What it measures:** the effect of watershed splitting on per-tile tree count and total crown area,
+run before and after the watershed step to confirm correct behaviour.
+
+**3-panel figure:**
+- Panel 1: grouped bar chart of pre/post tree count per tile
+- Panel 2: per-tile count ratio (post/pre); ratio > 1 indicates blobs were successfully split
+- Panel 3: per-tile total crown area (pre/post bars) with area ratio on a secondary axis
+
+**Key property — area conservation:** `area_ratio ≈ 1.000` across all tiles. Watershed splitting
+redistributes pixels between sub-polygons without removing them; the only source of ratio < 1 is
+the minimum-component filter (50 px ≈ 2 m²) discarding sub-threshold fragments after splitting.
+In practice total area loss is < 5 m² per tile.
+
+**Count ratio interpretation:** a high ratio in a tile with dense canopy or row plantings
+confirms the watershed is decomposing multi-tree blobs into individual crowns. A ratio near 1.0
+indicates either that no blobs exceeded the split threshold or that the tile had sparse tree cover.
+
+`pipeline.py:_save_watershed_comparison`
+
+### 10.3 Tile Summary PCT (`_save_tile_summary_pct`)
+
+**What it measures:** the same per-tile statistics as `_save_tile_summary` but normalised and
+displayed as a spatial heatmap grid (one cell per tile) rather than absolute counts.
+
+**6-panel heatmap:** tree count, BK match rate (%), crown area ratio (pipeline/BK), mean tree
+height, allometric R², and a spare panel for future metrics. The grid layout mirrors the actual
+tile (ix, iy) positions, making spatial patterns immediately visible — e.g. low match-rate
+tiles at the campus interior vs. high match-rate tiles along registered street corridors.
+
+`pipeline.py:_save_tile_summary_pct`
+
+---
+
+## 11. Results — ovgu_bbox2 @ 250 m Tiles
+
+### 11.1 Dataset
+
+| Metric | Value |
+|---|---|
+| Area | ovgu_bbox2 (OVGU campus + surrounding streets, Magdeburg) |
+| Tile grid | 9 × 9 = 81 tiles at 250 m |
+| Total segmented trees | 4,560 |
+| BK-matched trees | 1,088 (23.9 %) |
+| BK source | Baeume_SFM_2026.gpkg |
+
+Top matched species: Tilia cordata (211), Acer platanoides (178), Platanus acerifolia (78),
+Tilia euchlora (51), Acer pseudoplatanus (40).
+
+The 23.9 % match rate reflects the BK dataset covering only registered public street trees.
+Campus interior courtyards, parks, private-property gardens, and unmapped green spaces are
+absent from the BK — pipeline polygons in these areas have no BK counterpart and carry only
+allometric height estimates.
+
+### 11.2 Height Estimation Accuracy vs. BK Measured Heights
+
+Evaluated on the 1,088 BK-matched trees using
+`dev = (H_pred − H_BK) / H_BK × 100 [%]`:
+
+| Model | Mean dev | Median dev | Std | \|dev\| > 20 % | \|dev\| > 50 % |
+|---|---|---|---|---|---|
+| Global (A=1.317, B=0.318) | +42.5 % | +20.5 % | 92.5 % | 62.9 % | 29.2 % |
+| Per-species allometric | +39.7 % | +19.6 % | 87.3 % | 62.8 % | 27.8 % |
+
+The positive mean bias indicates systematic overestimation. The dominant cause is **merged
+crown blobs**: 18.2 % of matched trees (198 / 1,088) have pipeline `crown_area_m2 > 200 m²`,
+exceeding the maximum plausible single-tree crown footprint. These segments represent multiple
+trees whose canopies merged in the segmentation and were not fully decomposed by the watershed
+splitter. For this subset, the mean height overestimation is **+134.6 %** (median +89.6 %).
+
+Excluding merged blobs (CPA < 200 m², n = 890), the global model overestimation drops to
+**mean +22.0 %, median +13.7 %** — substantially better, but still positive-biased due to
+(a) BK heights being rounded to the nearest metre and (b) the allometric model's inherent
+scatter (R² = 0.53 citywide).
+
+The per-species refinement provides only marginal improvement (−2.8 pp mean, −0.9 pp median)
+because the dominant species on the OVGU campus — Tilia and Acer — have allometric coefficients
+close to the global fit (Tilia cordata A = 1.08 vs. global 1.317, but B = 0.39 vs. 0.318,
+partially offsetting).
+
+### 11.3 Per-Species vs. Global Model Comparison (4,102 trees)
+
+Source: `ovgu_bbox2_height_comparison_250m.json`
+
+| Metric | Value |
+|---|---|
+| Overall mean diff_pct | +2.35 % |
+| Overall std | 17.1 % |
+| Trees with \|diff\| > 5 % | 53.2 % |
+| Trees with \|diff\| > 10 % | 28.6 % |
+
+Most tiles fall within ±10 %. Tiles with strong species signal:
+
+| Tile | Mean diff_pct | Likely cause |
+|---|---|---|
+| (7,4) | +69.9 % | Populus-dominated (A ≈ 1.93) |
+| (8,4) | +60.8 % | Same |
+| (5,8) | +24.0 % | High-CPA trees, strong A-coefficient species |
+| (1,8) | +20.2 % | Mixed high-A species |
+| (6,7) | −37.0 % | Tilia-dominated corridor (A = 1.08) |
+| (4,1) | −19.0 % | Tilia / low-A species row planting |
+
+### 11.4 Watershed Splitting Effect
+
+Across all tiles in ovgu_bbox (confirmed from `ovgu_bbox_watershed_comparison_250m.png`):
+- Crown area ratio post/pre: **≈ 1.000** — pixel-area fully conserved
+- Tree count increases after splitting (merged blobs → individual crowns)
+- Tiles with high-density linear plantings show the largest count ratios,
+  confirming successful decomposition of row-planting clusters
+
+### 11.5 Discussion
+
+**Primary accuracy limitation — unsplit merged blobs:**
+The allometric formula `H = exp(A + B·ln(CPA))` is monotonically increasing in CPA. When
+N individual crowns merge into one polygon with area N × CPA_single, the estimated height
+becomes `exp(A + B·ln(N·CPA_single)) ≈ N^B × H_single`. With B ≈ 0.32:
+
+| Merged trees (N) | Height inflation factor |
+|---|---|
+| 2 | 2^0.32 ≈ 1.25× |
+| 4 | 4^0.32 ≈ 1.55× |
+| 16 | 16^0.32 ≈ 2.42× |
+
+Watershed splitting is therefore the critical quality gate for height accuracy. The 8.0 m
+maximum crown radius threshold (`MAX_CROWN_RADIUS_M`) catches most multi-tree blobs, but
+dense grove patches and large ornamental trees near the threshold remain unsplit.
+
+**BK match rate:** 23.9 % is not a pipeline failure. The BK registers only public street trees
+maintained by the city; the unregistered 76.1 % are real trees (private property, campus
+interiors, parks) for which the allometric model is the only height source.
+
+**Allometric model fitness:** R² = 0.53 citywide is the ceiling for a single power-law model
+fitted on all species and crown sizes. Per-species refinement brings R² above 0.65 for the
+most common broadleaf genera (Tilia 0.665, Quercus rubra 0.691, Styphnolobium 0.769). The
+model is least reliable for conifers (Pinus sylvestris R² = 0.082), where crown shape departs
+fundamentally from the circular broadleaf assumption used for CPA estimation.

@@ -8,6 +8,7 @@ import pandas as pd
 
 from src.config import (
     ALLOMETRIC_A, ALLOMETRIC_B, ALLOMETRIC_PROFILES,
+    BAUMKATASTER_PATHS,
     BK_MATCH_RADIUS_M, BK_MIN_HEIGHT_M, BK_MIN_CROWN_DIAM_M, BK_MATCH_BUFFER_MIN_M,
 )
 
@@ -17,6 +18,35 @@ DECIDUOUS_GENERA = {
     "Carpinus", "Prunus", "Platanus", "Populus", "Ulmus", "Betula",
     "Salix", "Fagus", "Sorbus", "Pyrus", "Malus",
 }
+
+
+def load_baumkataster(paths=None) -> gpd.GeoDataFrame | None:
+    """Load every configured tree registry as one GeoDataFrame.
+
+    The registries share a schema apart from the Baumnummer capitalisation, which is
+    harmonised to the lowercase form. A `source` column records the originating file
+    stem so per-registry statistics stay recoverable after the merge.
+
+    Missing files are skipped rather than raising, so the pipeline still runs on a
+    checkout without the references/ GeoPackages. Returns None if none are present.
+    """
+    paths = [p for p in (paths or BAUMKATASTER_PATHS) if p is not None and p.exists()]
+    if not paths:
+        return None
+
+    frames = []
+    for p in paths:
+        g = gpd.read_file(p)
+        if "Baumnummer" in g.columns:
+            g = g.rename(columns={"Baumnummer": "baumnummer"})
+        g["source"] = p.stem
+        frames.append(g)
+
+    crs_set = {str(g.crs) for g in frames}
+    if len(crs_set) > 1:
+        raise ValueError(f"Registries disagree on CRS: {sorted(crs_set)}")
+
+    return gpd.GeoDataFrame(pd.concat(frames, ignore_index=True), crs=frames[0].crs)
 
 
 def tile_dominant_genus(bk_tile: gpd.GeoDataFrame) -> str | None:

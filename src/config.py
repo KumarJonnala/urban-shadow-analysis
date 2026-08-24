@@ -54,6 +54,16 @@ MAX_SHADOW_FACTOR = 5.0
 # Set to None to disable enrichment (pipeline runs without it).
 BAUMKATASTER_PATH = Path(__file__).resolve().parents[1] / "references" / "Baeume_SFM_2026.gpkg"
 
+# All tree registries, merged on load by load_baumkataster(). They are complementary
+# rather than overlapping: SFM covers public green and street trees (85,302 points),
+# Liegenschaftsservice covers municipal-property trees (5,665). No LS point lies within
+# 1 m of an SFM point citywide, so the union double-counts nothing. LS contributes zero
+# trees inside ovgu_bbox and 26 inside ovgu_bbox2.
+BAUMKATASTER_PATHS = [
+    BAUMKATASTER_PATH,
+    Path(__file__).resolve().parents[1] / "references" / "Baeume_Liegenschaftsservice_2026.gpkg",
+]
+
 # --- Baumkataster matching (src/shadow/cadastre.py) ---
 
 # A pipeline crown polygon matches the nearest BK tree whose buffered point it

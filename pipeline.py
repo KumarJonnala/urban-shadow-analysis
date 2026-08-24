@@ -1084,17 +1084,18 @@ def cmd_segment(vegetation_model: str = DEFAULT_VEGETATION_MODEL, tile_size_m: i
     from shapely.geometry import box as shapely_box
     from pyproj import Transformer
     from src.shadow.casting import vectorize_trees
-    from src.shadow.cadastre import enrich_from_baumkataster, tile_dominant_genus
-    from src.config import BAUMKATASTER_PATH, ALLOMETRIC_PROFILES, CROWN_RADIUS_BY_GENUS
+    from src.shadow.cadastre import (enrich_from_baumkataster, load_baumkataster,
+                                     tile_dominant_genus)
+    from src.config import ALLOMETRIC_PROFILES, CROWN_RADIUS_BY_GENUS
 
     sizes = TILE_SIZES_M if all_sizes else [tile_size_m or TILE_SIZE_M]
     _, mask_fn = _load_vegetation_model(vegetation_model)
     _to_utm = Transformer.from_crs("EPSG:4326", "EPSG:25832", always_xy=True)
 
-    bk_gdf = None
-    if BAUMKATASTER_PATH and BAUMKATASTER_PATH.exists():
-        bk_gdf = gpd.read_file(BAUMKATASTER_PATH)
-        print(f"  Baumkataster: {len(bk_gdf):,} trees loaded from {BAUMKATASTER_PATH.name}")
+    bk_gdf = load_baumkataster()
+    if bk_gdf is not None:
+        per_source = ", ".join(f"{s} {n:,}" for s, n in bk_gdf["source"].value_counts().items())
+        print(f"  Baumkataster: {len(bk_gdf):,} trees loaded ({per_source})")
 
     for area_name, area in AREAS.items():
         buildings = fetch_buildings(area, cache_path=OUTPUT_DIR / f"buildings_{area_name}.fgb")
@@ -1718,15 +1719,14 @@ def cmd_species_grid(area_filter: str | None = None) -> None:
     import matplotlib.patches as mpatches
     from shapely.geometry import box
     from pyproj import Transformer
-    from src.shadow.cadastre import tile_dominant_genus
-    from src.config import BAUMKATASTER_PATH
+    from src.shadow.cadastre import load_baumkataster, tile_dominant_genus
 
-    if BAUMKATASTER_PATH is None or not BAUMKATASTER_PATH.exists():
-        print("  [skip] BAUMKATASTER_PATH not set or missing — species grid unavailable")
+    bk = load_baumkataster()
+    if bk is None:
+        print("  [skip] no Baumkataster registry found — species grid unavailable")
         return
 
     _to_utm = Transformer.from_crs("EPSG:4326", "EPSG:25832", always_xy=True)
-    bk = gpd.read_file(BAUMKATASTER_PATH)
 
     areas = {k: v for k, v in AREAS.items() if area_filter is None or k == area_filter}
 

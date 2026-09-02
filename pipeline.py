@@ -12,6 +12,7 @@ Subcommands:
   species-grid      — multi-panel PNG showing dominant BK species per tile for all tile sizes
   diurnal           — hourly shadow table + overlays for one tile across a full day
   status            — show what has been computed per area and tile size
+  cleanup           — delete the per-tile working set, keeping the merged layers and figures
   tune              — grid-search hyperparameters for a tunable model against a reference
   all               — download + segment + shadow (default when no subcommand given)
 
@@ -36,6 +37,9 @@ Examples:
   python pipeline.py species-grid                                    # dominant-species grid for all tile sizes
   python pipeline.py diurnal --date-utc "2026-06-21" --tile 1_1 --tile-size 250
   python pipeline.py status --all-sizes
+  python pipeline.py cleanup --all-sizes --dry-run                    # preview what cleanup removes
+  python pipeline.py cleanup --tile-size 250 --keep-masks             # keep the .npy segmentation masks
+  python pipeline.py all --tile-size 250 --cleanup                    # run, then drop the per-tile files
   python pipeline.py tune --model vari --tile 0_0
 """
 
@@ -1506,6 +1510,128 @@ def cmd_status(
             print(f"  {size:>4}m  {n_tiles:>4}/{total:<4}  {n_seg:>4}/{total:<4}   {n_shadow:>4}/{total}")
 
 
+# Per-tile artefacts that cleanup may remove: category -> (subdir, filename, label).
+# Both templates are formatted per tile, so every candidate path is an exact
+# {area}_tile_{ix}_{iy}... name derived from tiles_for_area — never a glob. That is what
+# keeps a merged layer, a render or a figure structurally unreachable from this command.
+CLEANUP_CATEGORIES = {
+    "ortho":      ("{area}/{size}m",   "{area}_tile_{ix}_{iy}.png",                     "orthophoto tiles"),
+    "mask":       ("segments/{size}m", "{area}_tile_{ix}_{iy}_{model}_seg.npy",          "segmentation masks"),
+    "overlay":    ("segments/{size}m", "{area}_tile_{ix}_{iy}_{model}_seg_overlay.png",  "segmentation overlays"),
+    "trees":      ("segments/{size}m", "{area}_tile_{ix}_{iy}_{model}_trees.fgb",        "per-tile tree polygons"),
+    "shadow_png": ("shadows/{size}m",  "{area}_tile_{ix}_{iy}_{model}_shadow.png",       "shadow overlays"),
+    "shadow_fgb": ("shadows/{size}m",  "{area}_tile_{ix}_{iy}_{model}_shadow.fgb",       "per-tile shadow polygons"),
+}
+
+
+def _cleanup_candidates(area_name: str, vegetation_model: str, size: int, categories) -> dict:
+    """Return {category: [existing paths]} for one area and tile size.
+
+    Pure enumeration — touches nothing. Shared by the dry-run report and the deletion
+    itself so the two can never disagree about what is in scope.
+    """
+    tiles = tiles_for_area(AREAS[area_name], size)
+    found = {}
+    for cat in categories:
+        subdir, fname, _ = CLEANUP_CATEGORIES[cat]
+        d = OUTPUT_DIR / subdir.format(area=area_name, size=size)
+        paths = (
+            d / fname.format(area=area_name, ix=t["ix"], iy=t["iy"], model=vegetation_model)
+            for t in tiles
+        )
+        found[cat] = [p for p in paths if p.exists()]
+    return found
+
+
+def cmd_cleanup(
+    area_filter: str | None = None,
+    vegetation_model: str = DEFAULT_VEGETATION_MODEL,
+    tile_size_m: int | None = None,
+    all_sizes: bool = False,
+    dry_run: bool = False,
+    keep_tiles: bool = False,
+    keep_masks: bool = False,
+    assume_yes: bool = False,
+) -> None:
+    """Delete the per-tile working set, keeping the merged layers and every figure.
+
+    The per-tile files exist so that _merge_layer can concatenate them; once
+    {area}_{model}_{layer}_merged.fgb is written they are dead weight — roughly 84% of
+    data/orthophotos. Retained: merged FGBs, render PNGs, tile-summary / height-comparison
+    / watershed / location-map figures and their JSON, {area}_full.png (every figure stage
+    reads it), the OSM buildings and roads caches, and everything under chm/.
+
+    Nothing is removed for an area/size whose merged trees layer is missing, so a
+    half-finished run is never stripped of the inputs it still needs.
+
+    Recovery: data/ is committed, so `git restore data/orthophotos/` undoes a cleanup.
+    The orthophoto tiles can also be re-fetched with `download`, which overwrites
+    unconditionally.
+    """
+    categories = [
+        c for c in CLEANUP_CATEGORIES
+        if not (keep_tiles and c == "ortho") and not (keep_masks and c == "mask")
+    ]
+    sizes = TILE_SIZES_M if all_sizes else [tile_size_m or TILE_SIZE_M]
+    areas = {k: v for k, v in AREAS.items() if area_filter is None or k == area_filter}
+    if not areas:
+        print(f"No area named {area_filter!r}. Available: {list(AREAS)}")
+        return
+
+    planned = []          # every path to unlink, collected before anything is removed
+    total_bytes = 0
+
+    for area_name in areas:
+        print(f"\n{area_name}  (model: {vegetation_model})")
+        for size in sizes:
+            seg_dir = OUTPUT_DIR / "segments" / f"{size}m"
+            merged = seg_dir / f"{area_name}_{vegetation_model}_trees_merged.fgb"
+            if not merged.exists() or merged.stat().st_size == 0:
+                print(f"  {size:>4}m  SKIP — no merged trees layer, run 'segment' first")
+                continue
+
+            found = _cleanup_candidates(area_name, vegetation_model, size, categories)
+            if not any(found.values()):
+                print(f"  {size:>4}m  already clean")
+                continue
+
+            print(f"  {size:>4}m")
+            for cat in categories:
+                paths = found[cat]
+                if not paths:
+                    continue
+                nbytes = sum(p.stat().st_size for p in paths)
+                label = CLEANUP_CATEGORIES[cat][2]
+                print(f"      {label:<24} {len(paths):>4} files  {nbytes / 1e6:>8.1f} MB")
+                planned.extend(paths)
+                total_bytes += nbytes
+
+    if not planned:
+        print("\nNothing to clean up.")
+        return
+
+    print(f"\n{len(planned)} files, {total_bytes / 1e6:.1f} MB"
+          f"  —  keeping merged layers, renders, figures, full-area images and OSM layers")
+
+    if dry_run:
+        print("--dry-run: nothing deleted.")
+        return
+
+    if not assume_yes:
+        try:
+            reply = input("Delete these files? Type 'yes' to confirm: ").strip()
+        except EOFError:
+            reply = ""
+        if reply != "yes":
+            print("Aborted, nothing deleted.")
+            return
+
+    for p in planned:
+        p.unlink()
+    print(f"Removed {len(planned)} files, freed {total_bytes / 1e6:.1f} MB.")
+    print("Undo with:  git restore data/orthophotos/")
+
+
 def cmd_diurnal(
     area_filter: str | None = None,
     vegetation_model: str = DEFAULT_VEGETATION_MODEL,
@@ -1806,12 +1932,18 @@ def cmd_species_grid(area_filter: str | None = None) -> None:
         print(f"  {area_name} → {out.name}")
 
 
-def cmd_all(dry_run: bool = False, vegetation_model: str = DEFAULT_VEGETATION_MODEL, datetime_utc: str | None = None, tile_size_m: int | None = None, all_sizes: bool = False) -> None:
+def cmd_all(dry_run: bool = False, vegetation_model: str = DEFAULT_VEGETATION_MODEL, datetime_utc: str | None = None, tile_size_m: int | None = None, all_sizes: bool = False, cleanup: bool = False) -> None:
     cmd_download(dry_run=dry_run, tile_size_m=tile_size_m, all_sizes=all_sizes)
     if not dry_run:
         cmd_segment(vegetation_model=vegetation_model, tile_size_m=tile_size_m, all_sizes=all_sizes)
         cmd_shadow(vegetation_model=vegetation_model, datetime_utc=datetime_utc, tile_size_m=tile_size_m, all_sizes=all_sizes)
         cmd_species_grid()
+        if cleanup:
+            # The merged layers were just written, so the cleanup gate is satisfied by
+            # construction — no interactive confirmation needed.
+            print("\n=== cleanup ===")
+            cmd_cleanup(vegetation_model=vegetation_model, tile_size_m=tile_size_m,
+                        all_sizes=all_sizes, assume_yes=True)
 
 
 if __name__ == "__main__":
@@ -1943,6 +2075,22 @@ if __name__ == "__main__":
     sta.add_argument("--tile-size", type=int, default=None, metavar="M", help="Single tile size in metres")
     sta.add_argument("--all-sizes", action="store_true", help=f"Show status for all TILE_SIZES_M {TILE_SIZES_M}")
 
+    cln = sub.add_parser("cleanup", help="Delete the per-tile working set, keeping merged layers and figures")
+    cln.add_argument("--area", default=None, help="Limit to a single area name")
+    cln.add_argument(
+        "--vegetation-model",
+        choices=VEGETATION_MODELS,
+        default=DEFAULT_VEGETATION_MODEL,
+        help=f"Model whose per-tile outputs to remove (default: {DEFAULT_VEGETATION_MODEL})",
+    )
+    cln.add_argument("--tile-size", type=int, default=None, metavar="M", help="Single tile size in metres")
+    cln.add_argument("--all-sizes", action="store_true", help=f"Clean up all TILE_SIZES_M {TILE_SIZES_M}")
+    cln.add_argument("--dry-run", action="store_true", help="Show what would be removed without deleting")
+    cln.add_argument("--keep-tiles", action="store_true", help="Keep the downloaded orthophoto tiles")
+    cln.add_argument("--keep-masks", action="store_true",
+                     help="Keep the _seg.npy masks (validation.ipynb §4 recomputes crowns from them)")
+    cln.add_argument("--yes", action="store_true", help="Skip the confirmation prompt")
+
     spg = sub.add_parser("species-grid", help="Multi-panel PNG: dominant BK species per tile for all tile sizes")
     spg.add_argument("--area", default=None, help="Limit to a single area name")
 
@@ -1973,6 +2121,8 @@ if __name__ == "__main__":
     )
     all_cmd.add_argument("--tile-size", type=int, default=None, metavar="M", help="Single tile size in metres")
     all_cmd.add_argument("--all-sizes", action="store_true", help=f"Run for all TILE_SIZES_M {TILE_SIZES_M}")
+    all_cmd.add_argument("--cleanup", action="store_true",
+                         help="After merging, delete the per-tile working set (no confirmation prompt)")
 
     args = parser.parse_args()
 
@@ -2011,6 +2161,11 @@ if __name__ == "__main__":
                   tile_size_m=args.tile_size, all_sizes=args.all_sizes, layers=layers)
     elif args.command == "status":
         cmd_status(area_filter=args.area, vegetation_model=args.vegetation_model, tile_size_m=args.tile_size, all_sizes=args.all_sizes)
+    elif args.command == "cleanup":
+        cmd_cleanup(area_filter=args.area, vegetation_model=args.vegetation_model,
+                    tile_size_m=args.tile_size, all_sizes=args.all_sizes,
+                    dry_run=args.dry_run, keep_tiles=args.keep_tiles,
+                    keep_masks=args.keep_masks, assume_yes=args.yes)
     elif args.command == "diurnal":
         cmd_diurnal(area_filter=args.area, vegetation_model=args.vegetation_model, date_utc=args.date_utc, tile_key=args.tile, tile_size_m=args.tile_size)
     elif args.command == "tune":
@@ -2021,6 +2176,6 @@ if __name__ == "__main__":
             reference_model=args.reference,
         )
     elif args.command == "all":
-        cmd_all(dry_run=args.dry_run, vegetation_model=args.vegetation_model, datetime_utc=args.datetime_utc, tile_size_m=args.tile_size, all_sizes=args.all_sizes)
+        cmd_all(dry_run=args.dry_run, vegetation_model=args.vegetation_model, datetime_utc=args.datetime_utc, tile_size_m=args.tile_size, all_sizes=args.all_sizes, cleanup=args.cleanup)
     else:
         cmd_all(tile_size_m=args.tile_size, all_sizes=args.all_sizes)

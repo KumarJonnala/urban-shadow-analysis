@@ -41,6 +41,15 @@ python pipeline.py merge --layer trees --tile-size 250
 # Check what has been computed
 python pipeline.py status --all-sizes
 
+# Reclaim the per-tile working set once the merged layers exist (~84% of data/orthophotos).
+# Keeps merged FGBs, renders, figures, full-area images and the OSM layers; refuses to run
+# for any area/size whose merged trees layer is missing. Undo with:
+#   git restore data/orthophotos/
+python pipeline.py cleanup --all-sizes --dry-run     # preview, deletes nothing
+python pipeline.py cleanup --tile-size 250           # prompts before deleting
+python pipeline.py cleanup --tile-size 250 --keep-masks   # keep _seg.npy for validation.ipynb §4
+python pipeline.py all --tile-size 250 --cleanup     # run the pipeline, then clean up
+
 # Benchmark all vegetation models side-by-side
 python pipeline.py compare models
 
@@ -134,7 +143,7 @@ urban-shadow-analysis/
 │   │       └── ...
 │   ├── sentinel2/          # Sentinel-2 time-series GeoTIFFs
 │   └── sam_checkpoints/    # SAM ViT-B weights
-├── pipeline.py             # CLI: download / segment / compare {models,sizes} / shadow / merge / diurnal / status / tune / all
+├── pipeline.py             # CLI: download / segment / compare {models,sizes} / shadow / merge / diurnal / status / cleanup / tune / all
 ├── requirements.txt
 └── README.md
 ```
